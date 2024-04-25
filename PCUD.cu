@@ -9,7 +9,7 @@
 #define X_MAX 100.0f
 #define X_MIN -100.0f
 #define V_MAX 20.0f
-#define BLOCK_SIZE 256  // Adjust based on your GPU's capability
+#define BLOCK_SIZE 256
 
 struct Particle {
     float position[DIMENSIONS];
