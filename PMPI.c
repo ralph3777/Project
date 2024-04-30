@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include <time.h>
+#include <string.h>
 
 #define SWARM_SIZE 30
 #define MAX_ITER 100
@@ -10,6 +11,7 @@
 #define X_MAX 100
 #define X_MIN -100
 #define V_MAX 20
+#define COMM_INTERVAL 10  // Update the global best every 5 iterations
 
 typedef struct {
     double position[DIMENSIONS];
@@ -42,7 +44,7 @@ void update_particles(Particle swarm[], double global_best_position[], int num_p
         for (int d = 0; d < DIMENSIONS; d++) {
             double r1 = (double)rand() / RAND_MAX;
             double r2 = (double)rand() / RAND_MAX;
-            swarm[i].velocity[d] = w * swarm[i].velocity[d] 
+            swarm[i].velocity[d] = w * swarm[i].velocity[d]
                 + c1 * r1 * (swarm[i].personal_best_position[d] - swarm[i].position[d])
                 + c2 * r2 * (global_best_position[d] - swarm[i].position[d]);
 
@@ -65,45 +67,53 @@ void update_particles(Particle swarm[], double global_best_position[], int num_p
 }
 
 int main(int argc, char* argv[]) {
-    int rank, size;
     MPI_Init(&argc, &argv);
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-    MPI_Comm_size(MPI_COMM_WORLD, &size);
+    int world_size, world_rank;
+    MPI_Comm_size(MPI_COMM_WORLD, &world_size);
+    MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
+    srand(time(NULL) + world_rank);
 
-    srand(time(NULL) + rank);
-    int num_particles = SWARM_SIZE / size;
-
-    Particle swarm[num_particles];
+    int particles_per_proc = SWARM_SIZE / world_size + (world_rank < SWARM_SIZE % world_size ? 1 : 0);
+    Particle local_swarm[particles_per_proc];
     double global_best_position[DIMENSIONS];
     double global_best_value = INFINITY;
-    double local_best_position[DIMENSIONS];
-    double local_best_value = INFINITY;
 
-    initialize_particles(swarm, num_particles);
+    double start_time = MPI_Wtime();
+
+    initialize_particles(local_swarm, particles_per_proc);
 
     for (int iter = 0; iter < MAX_ITER; iter++) {
-        for (int i = 0; i < num_particles; i++) {
-            if (swarm[i].personal_best_value < local_best_value) {
-                local_best_value = swarm[i].personal_best_value;
-                for (int d = 0; d < DIMENSIONS; d++) {
-                    local_best_position[d] = swarm[i].personal_best_position[d];
+        update_particles(local_swarm, global_best_position, particles_per_proc);
+
+        if (iter % COMM_INTERVAL == 0 || iter == MAX_ITER - 1) {
+            double local_best_value = INFINITY;
+            double local_best_position[DIMENSIONS];
+            for (int i = 0; i < particles_per_proc; i++) {
+                if (local_swarm[i].personal_best_value < local_best_value) {
+                    local_best_value = local_swarm[i].personal_best_value;
+                    memcpy(local_best_position, local_swarm[i].personal_best_position, DIMENSIONS * sizeof(double));
                 }
             }
-        }
 
-        MPI_Allreduce(&local_best_value, &global_best_value, 1, MPI_DOUBLE, MPI_MIN, MPI_COMM_WORLD);
-        double temp_best_position[DIMENSIONS];
-        MPI_Allreduce(local_best_position, temp_best_position, DIMENSIONS, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
-        if (local_best_value == global_best_value) {
-            for (int d = 0; d < DIMENSIONS; d++) {
-                global_best_position[d] = temp_best_position[d];
+            double new_global_best_value;
+            MPI_Allreduce(&local_best_value, &new_global_best_value, 1, MPI_DOUBLE, MPI_MIN, MPI_COMM_WORLD);
+
+            if (new_global_best_value < global_best_value) {
+                global_best_value = new_global_best_value;
+                MPI_Bcast(local_best_position, DIMENSIONS, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+                memcpy(global_best_position, local_best_position, DIMENSIONS * sizeof(double));
             }
         }
 
-        update_particles(swarm, global_best_position, num_particles);
-        if (rank == 0) {
+        if (world_rank == 0 && (iter % COMM_INTERVAL == 0 || iter == MAX_ITER - 1)) {
             printf("Iteration %d: Best Value = %f\n", iter, global_best_value);
         }
+    }
+
+    double end_time = MPI_Wtime();
+
+    if (world_rank == 0) {
+        printf("Elapsed time: %f seconds\n", end_time - start_time);
     }
 
     MPI_Finalize();
