@@ -11,7 +11,7 @@
 #define X_MAX 100
 #define X_MIN -100
 #define V_MAX 20
-#define COMM_INTERVAL 10  // Update the global best every 5 iterations
+#define COMM_INTERVAL 10 
 
 typedef struct {
     double position[DIMENSIONS];
