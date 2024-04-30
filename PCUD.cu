@@ -78,13 +78,11 @@ int main() {
     cudaMalloc(&d_global_best_value, sizeof(double));
     cudaMalloc(&d_states, sizeof(curandState) * SWARM_SIZE);
 
-    // Prepare CUDA events for timing
     cudaEvent_t start, stop;
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
     float milliseconds = 0;
 
-    // Start timing after initialization
     cudaEventRecord(start);
 
     dim3 blocks((SWARM_SIZE + 15) / 16);
@@ -95,22 +93,19 @@ int main() {
 
     for (int iter = 0; iter < MAX_ITER; iter++) {
         update_particles<<<blocks, threads>>>(d_swarm, d_global_best_position, d_states);
-        cudaDeviceSynchronize(); // Ensure all updates are completed
+        cudaDeviceSynchronize();
     }
 
-    // Stop timing after computation is done
     cudaEventRecord(stop);
     cudaEventSynchronize(stop);
     cudaEventElapsedTime(&milliseconds, start, stop);
 
-    // Copy the global best position and value back to host
     cudaMemcpy(global_best_position, d_global_best_position, sizeof(double) * DIMENSIONS, cudaMemcpyDeviceToHost);
     cudaMemcpy(&global_best_value, d_global_best_value, sizeof(double), cudaMemcpyDeviceToHost);
 
     printf("Best Value = %f at position (%f, %f)\n", global_best_value, global_best_position[0], global_best_position[1]);
 
 
-    // Cleanup
     cudaFree(d_swarm);
     cudaFree(d_global_best_position);
     cudaFree(d_global_best_value);
